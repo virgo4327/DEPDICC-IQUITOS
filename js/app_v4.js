@@ -398,8 +398,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     .insert([{ numero: 'NUEVO_INFORME', fecha: today, detalle: '', estado: 'Pendiente' }]);
                     
                 if (error) throw error;
-                // It will auto-refresh via realtime
-                if (!realtimeSubscription) loadInformes();
+                // Siempre recargar la tabla localmente para evitar que se quede "Sincronizando" si fallan los webSockets
+                loadInformes();
             } catch (err) {
                 console.error('Error agregando:', err);
                 showToast('Asegúrate de haber creado la tabla SQL primero', 'error');
@@ -426,6 +426,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 .eq('id', id);
 
             if (error) throw error;
+            loadInformes();
         } catch (err) {
             console.error('Error eliminando:', err);
             showToast('Error al eliminar', 'error');
