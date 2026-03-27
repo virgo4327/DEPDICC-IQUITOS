@@ -214,4 +214,245 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }, duration);
     }
+
+    // =============== EXPERIMENTAL SUPABASE INTEGRATION ===============
+    const SUPABASE_URL = 'https://clgsccolqatrkbowqozg.supabase.co';
+    const SUPABASE_ANON_KEY = 'sb_publishable_j__CxuQ8OaiZff77o3uunQ_xwbMSwr5';
+    let supabaseClient = null;
+    let realtimeSubscription = null;
+
+    if (window.supabase) {
+        supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    } else {
+        console.warn("Supabase script no está cargado.");
+    }
+
+    const cardSupabase = document.getElementById('card-supabase');
+    const dataEntrySection = document.getElementById('data-entry-section');
+    const backToDashboardBtn = document.getElementById('back-to-dashboard');
+    const tableBody = document.getElementById('table-body');
+    const btnAddRow = document.getElementById('btn-add-row');
+    const searchInput = document.getElementById('search-input');
+    const syncDot = document.getElementById('sync-dot');
+    const syncText = document.getElementById('sync-text');
+
+    // Prevent default card behavior on the Supabase card
+    if (cardSupabase) {
+        // Stop clicks from reaching the document/card standard behavior
+        cardSupabase.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            showDataEntryView();
+        });
+        
+        const btnOpenSupabase = document.getElementById('btn-open-supabase');
+        if (btnOpenSupabase) {
+            btnOpenSupabase.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                showDataEntryView();
+            });
+        }
+    }
+
+    if (backToDashboardBtn) {
+        backToDashboardBtn.addEventListener('click', hideDataEntryView);
+    }
+
+    function showDataEntryView() {
+        dashboardSection.classList.add('hidden');
+        dashboardSection.classList.remove('active');
+        dataEntrySection.classList.remove('hidden');
+        dataEntrySection.classList.add('active');
+        
+        if (supabaseClient) {
+            loadInformes();
+            setupRealtimeSubscription();
+        } else {
+            showToast('Error: Cliente de Supabase no cargado', 'error');
+        }
+    }
+
+    function hideDataEntryView() {
+        dataEntrySection.classList.add('hidden');
+        dataEntrySection.classList.remove('active');
+        dashboardSection.classList.remove('hidden');
+        dashboardSection.classList.add('active');
+        
+        if (realtimeSubscription) {
+            supabaseClient.removeChannel(realtimeSubscription);
+            realtimeSubscription = null;
+        }
+    }
+
+    function setSyncStatus(isOnline) {
+        if(!syncDot) return;
+        const statusContainer = syncDot.parentElement;
+        if (isOnline) {
+            statusContainer.classList.remove('offline');
+            syncText.textContent = 'En línea / Sincronizado';
+        } else {
+            statusContainer.classList.add('offline');
+            syncText.textContent = 'Desconectado / Sincronizando...';
+        }
+    }
+
+    async function loadInformes() {
+        if (!supabaseClient) return;
+        setSyncStatus(false);
+        try {
+            const { data, error } = await supabaseClient
+                .from('informes')
+                .select('*')
+                .order('created_at', { ascending: false });
+                
+            if (error) throw error;
+            renderTable(data);
+            setSyncStatus(true);
+        } catch (err) {
+            console.error('Error cargando informes:', err);
+            showToast('Error al conectar con la base de datos', 'error');
+            setSyncStatus(false);
+        }
+    }
+
+    function renderTable(informes) {
+        if (!tableBody) return;
+        tableBody.innerHTML = '';
+        if (!informes || informes.length === 0) {
+            tableBody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted)">No hay registros. Haz clic en "+ Nuevo Registro".</td></tr>';
+            return;
+        }
+
+        const filterVal = searchInput ? searchInput.value.toLowerCase() : '';
+        
+        informes.forEach(informe => {
+            if (filterVal) {
+                const searchStr = `${informe.numero} ${informe.detalle} ${informe.estado}`.toLowerCase();
+                if (!searchStr.includes(filterVal)) return;
+            }
+
+            const tr = document.createElement('tr');
+            tr.dataset.id = informe.id;
+            
+            tr.innerHTML = `
+                <td><input type="text" class="cell-input" data-field="numero" value="${informe.numero || ''}" placeholder="Ej: 001-2026"></td>
+                <td><input type="date" class="cell-input" data-field="fecha" value="${informe.fecha || ''}"></td>
+                <td><input type="text" class="cell-input" data-field="detalle" value="${informe.detalle || ''}" placeholder="Detalle del informe"></td>
+                <td><input type="text" class="cell-input" data-field="estado" value="${informe.estado || ''}" placeholder="Pendiente / Atendido"></td>
+                <td>
+                    <button class="btn-delete" data-id="${informe.id}">Eliminar</button>
+                </td>
+            `;
+            tableBody.appendChild(tr);
+        });
+
+        // Add event listeners for inline editing
+        tableBody.querySelectorAll('.cell-input').forEach(input => {
+            input.addEventListener('change', (e) => updateInforme(e.target));
+        });
+
+        tableBody.querySelectorAll('.btn-delete').forEach(btn => {
+            btn.addEventListener('click', (e) => deleteInforme(e.target.dataset.id));
+        });
+    }
+
+    async function updateInforme(inputElement) {
+        if (!supabaseClient) return;
+        const tr = inputElement.closest('tr');
+        const id = tr.dataset.id;
+        const field = inputElement.dataset.field;
+        let value = inputElement.value;
+        
+        // Handle null dates correctly
+        if (field === 'fecha' && value === '') value = null;
+
+        inputElement.classList.add('saving-indicator');
+        setSyncStatus(false);
+
+        try {
+            const { error } = await supabaseClient
+                .from('informes')
+                .update({ [field]: value })
+                .eq('id', id);
+
+            if (error) throw error;
+            setSyncStatus(true);
+        } catch (err) {
+            console.error('Error actualizando:', err);
+            showToast('Error al guardar. Verifica los datos.', 'error');
+        } finally {
+            inputElement.classList.remove('saving-indicator');
+        }
+    }
+
+    if (btnAddRow) {
+        btnAddRow.addEventListener('click', async () => {
+            if (!supabaseClient) return;
+            setSyncStatus(false);
+            try {
+                // Default date to today
+                const today = new Date().toISOString().split('T')[0];
+                const { error } = await supabaseClient
+                    .from('informes')
+                    .insert([{ numero: 'NUEVO_INFORME', fecha: today, detalle: '', estado: 'Pendiente' }]);
+                    
+                if (error) throw error;
+                // It will auto-refresh via realtime
+                if (!realtimeSubscription) loadInformes();
+            } catch (err) {
+                console.error('Error agregando:', err);
+                showToast('Asegúrate de haber creado la tabla SQL primero', 'error');
+                setSyncStatus(false);
+            }
+        });
+    }
+
+    if (searchInput) {
+        searchInput.addEventListener('input', () => {
+            // Local filtering
+            loadInformes();
+        });
+    }
+
+    async function deleteInforme(id) {
+        if (!confirm('¿Seguro que deseas eliminar definitivamente este registro de la base de datos?')) return;
+        if (!supabaseClient) return;
+        setSyncStatus(false);
+        try {
+            const { error } = await supabaseClient
+                .from('informes')
+                .delete()
+                .eq('id', id);
+
+            if (error) throw error;
+        } catch (err) {
+            console.error('Error eliminando:', err);
+            showToast('Error al eliminar', 'error');
+            setSyncStatus(false);
+        }
+    }
+
+    function setupRealtimeSubscription() {
+        if (!supabaseClient) return;
+        if (realtimeSubscription) return; // already listening
+
+        realtimeSubscription = supabaseClient
+            .channel('custom-all-channel')
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'informes' },
+                (payload) => {
+                    console.log('Cambio detectado por WebSockets:', payload);
+                    // Refresh data
+                    loadInformes();
+                }
+            )
+            .subscribe((status) => {
+                if(status === 'SUBSCRIBED') {
+                    console.log('Suscrito a Supabase Real-Time');
+                }
+            });
+    }
 });
+
