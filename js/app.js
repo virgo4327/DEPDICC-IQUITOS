@@ -165,13 +165,9 @@ document.addEventListener('DOMContentLoaded', () => {
     function openUrl(card) {
         const url = card.getAttribute('data-url');
         if (url) {
-            // Cache Busting: Añadir timestamp para forzar descarga de versión nueva
-            const separator = url.includes('?') ? '&' : '?';
-            const cacheBustedUrl = `${url}${separator}cb=${Date.now()}`;
-
             showToast('📂 Abriendo archivo, por favor espere...', 'info', 2000);
             setTimeout(() => {
-                window.open(cacheBustedUrl, '_blank');
+                window.open(url, '_blank');
             }, 800);
         }
     }
